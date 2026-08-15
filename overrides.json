@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "MYAT-001",
+    "price": 21000,
+    "priceText": "21,000 ကျပ်",
+    "available": true,
+    "featured": false,
+    "updatedAt": "2026-08-15"
+  }
+]
