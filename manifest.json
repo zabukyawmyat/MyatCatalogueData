@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 2,
+  "catalogVersion": "2026.08.15.1",
+  "updatedAt": "2026-08-15T10:18:00Z",
+  "mode": "overrides",
+  "productFiles": ["overrides.json"],
+  "expectedBaseProductCount": 102
+}
