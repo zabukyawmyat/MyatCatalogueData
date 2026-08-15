@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       product_id:
-        description: 'Product Code (ဥပမာ MYAT-001)'
+        description: 'Product Code (ဥပမာ MYAT-001 / MYAT-103)'
         required: true
         type: string
       price:
@@ -16,19 +16,13 @@ on:
         required: true
         default: 'no_change'
         type: choice
-        options:
-          - no_change
-          - in_stock
-          - out_of_stock
+        options: [no_change, in_stock, out_of_stock]
       featured:
         description: 'Featured status'
         required: true
         default: 'no_change'
         type: choice
-        options:
-          - no_change
-          - featured
-          - normal
+        options: [no_change, featured, normal]
       remove_override:
         description: 'ဒီ Product ရဲ့ online override ကိုဖျက်မလား'
         required: true
@@ -43,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Validate and update product override
         env:
           PRODUCT_ID: ${{ inputs.product_id }}
@@ -56,89 +49,53 @@ jobs:
           import json, os, re
           from datetime import datetime, timezone
           from pathlib import Path
-
-          # Basic file validation first.
-          manifest_path=Path('manifest.json')
-          overrides_path=Path('overrides.json')
+          manifest_path=Path('manifest.json'); overrides_path=Path('overrides.json')
           manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
           data=json.loads(overrides_path.read_text(encoding='utf-8'))
-          if not isinstance(data,list):
-              raise SystemExit('overrides.json must be a JSON list')
-
+          additions=json.loads(Path('additions.json').read_text(encoding='utf-8'))
+          if not isinstance(data,list) or not isinstance(additions,list): raise SystemExit('Invalid catalogue JSON')
           pid=os.environ['PRODUCT_ID'].strip().upper()
-          m=re.fullmatch(r'MYAT-(\d{3})', pid)
-          if not m:
-              raise SystemExit('Product Code must look like MYAT-001')
+          m=re.fullmatch(r'MYAT-(\d{3,4})',pid)
+          if not m: raise SystemExit('Product Code must look like MYAT-001')
           number=int(m.group(1))
-          if number < 1 or number > 102:
-              raise SystemExit('Product Code must be between MYAT-001 and MYAT-102')
-
+          valid=(1<=number<=102) or any(x.get('id')==pid for x in additions)
+          if not valid: raise SystemExit(f'{pid} does not exist in bundled or online-added catalogue')
           remove=os.environ.get('REMOVE_OVERRIDE','false').lower()=='true'
           existing=next((x for x in data if x.get('id')==pid),None)
-
           if remove:
               data=[x for x in data if x.get('id')!=pid]
           else:
               item=dict(existing or {'id':pid})
               price=os.environ.get('PRICE','').strip().replace(',','')
+              stock=os.environ.get('STOCK','no_change'); featured=os.environ.get('FEATURED','no_change')
               if price:
-                  if not price.isdigit():
-                      raise SystemExit('Price must contain numbers only')
+                  if not price.isdigit(): raise SystemExit('Price must contain numbers only')
                   value=int(price)
-                  if value < 0 or value > 100000000:
-                      raise SystemExit('Price value is outside the allowed range')
-                  item['price']=value
-                  item['priceText']=f'{value:,} ကျပ်'
-
-              stock=os.environ.get('STOCK','no_change')
+                  if value<0 or value>100000000: raise SystemExit('Price outside allowed range')
+                  item['price']=value; item['priceText']=f'{value:,} ကျပ်'
               if stock=='in_stock': item['available']=True
               elif stock=='out_of_stock': item['available']=False
-
-              featured=os.environ.get('FEATURED','no_change')
               if featured=='featured': item['featured']=True
               elif featured=='normal': item['featured']=False
-
-              # Avoid creating an empty/no-op override.
-              if not existing and not price and stock=='no_change' and featured=='no_change':
-                  raise SystemExit('No change was requested for this product')
-
+              if not existing and not price and stock=='no_change' and featured=='no_change': raise SystemExit('No change requested')
               item['updatedAt']=datetime.now(timezone.utc).date().isoformat()
-              data=[x for x in data if x.get('id')!=pid]
-              data.append(item)
-              data.sort(key=lambda x:x.get('id',''))
-
-          # Validate every override ID before writing.
-          seen=set()
+              data=[x for x in data if x.get('id')!=pid]; data.append(item)
+              data.sort(key=lambda x:int(x.get('id','MYAT-9999').split('-')[-1]))
+          seen=set(); addition_ids={x.get('id') for x in additions}
           for item in data:
-              iid=item.get('id','')
-              mm=re.fullmatch(r'MYAT-(\d{3})', iid)
-              if not mm or not (1 <= int(mm.group(1)) <= 102):
-                  raise SystemExit(f'Invalid override Product Code: {iid}')
-              if iid in seen:
-                  raise SystemExit(f'Duplicate override Product Code: {iid}')
+              iid=item.get('id',''); mm=re.fullmatch(r'MYAT-(\d{3,4})',iid)
+              if not mm: raise SystemExit(f'Invalid override Product Code: {iid}')
+              num=int(mm.group(1))
+              if not ((1<=num<=102) or iid in addition_ids): raise SystemExit(f'Override refers to missing product: {iid}')
+              if iid in seen: raise SystemExit(f'Duplicate override: {iid}')
               seen.add(iid)
-
           overrides_path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-
-          now=datetime.now(timezone.utc)
-          manifest['schemaVersion']=2
-          manifest['mode']='overrides'
-          manifest['productFiles']=['overrides.json']
-          manifest['expectedBaseProductCount']=102
-          manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
-          manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
+          now=datetime.now(timezone.utc); manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S'); manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
           manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-          print('Updated',pid,'remove=' + str(remove))
           PY
-
       - name: Commit online catalogue update
         run: |
           git config user.name 'Myat Catalogue Bot'
           git config user.email 'actions@users.noreply.github.com'
           git add overrides.json manifest.json
-          if git diff --cached --quiet; then
-            echo 'No data change.'
-          else
-            git commit -m "Update ${{ inputs.product_id }} catalogue data"
-            git push
-          fi
+          if git diff --cached --quiet; then echo 'No data change.'; else git commit -m "Update ${{ inputs.product_id }} catalogue data"; git push; fi
