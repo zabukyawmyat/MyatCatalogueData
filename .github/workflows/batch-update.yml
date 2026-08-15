@@ -1,0 +1,125 @@
+name: Batch Update Catalogue Products
+
+on:
+  workflow_dispatch:
+    inputs:
+      updates:
+        description: 'တစ်ကြောင်းစီ: MYAT-001,22000,in_stock | MYAT-002,,out_of_stock'
+        required: true
+        type: string
+      featured_default:
+        description: 'Featured default for rows without 4th value'
+        required: true
+        default: 'no_change'
+        type: choice
+        options:
+          - no_change
+          - featured
+          - normal
+
+permissions:
+  contents: write
+
+jobs:
+  batch-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate and apply batch updates
+        env:
+          UPDATES: ${{ inputs.updates }}
+          FEATURED_DEFAULT: ${{ inputs.featured_default }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          raw=os.environ.get('UPDATES','').strip()
+          if not raw:
+              raise SystemExit('No updates supplied')
+
+          rows=[x.strip() for x in raw.splitlines() if x.strip()]
+          if len(rows)>102:
+              raise SystemExit('Maximum 102 rows per run')
+
+          path=Path('overrides.json')
+          data=json.loads(path.read_text(encoding='utf-8'))
+          if not isinstance(data,list):
+              raise SystemExit('overrides.json must be a list')
+          by_id={x.get('id'):dict(x) for x in data if isinstance(x,dict) and x.get('id')}
+
+          seen=set()
+          changed=[]
+          today=datetime.now(timezone.utc).date().isoformat()
+          featured_default=os.environ.get('FEATURED_DEFAULT','no_change')
+
+          for line_no,line in enumerate(rows,1):
+              parts=[p.strip() for p in line.split(',')]
+              if len(parts)<1 or len(parts)>4:
+                  raise SystemExit(f'Line {line_no}: use ID,price,stock,featured')
+              parts += ['']*(4-len(parts))
+              pid,price,stock,featured=parts
+              pid=pid.upper()
+              if not re.fullmatch(r'MYAT-\d{3}',pid):
+                  raise SystemExit(f'Line {line_no}: invalid Product Code')
+              n=int(pid.split('-')[1])
+              if not 1<=n<=102:
+                  raise SystemExit(f'Line {line_no}: Product must be MYAT-001 through MYAT-102')
+              if pid in seen:
+                  raise SystemExit(f'Line {line_no}: duplicate {pid}')
+              seen.add(pid)
+
+              stock=stock or 'no_change'
+              featured=featured or featured_default
+              if stock not in {'no_change','in_stock','out_of_stock'}:
+                  raise SystemExit(f'Line {line_no}: stock must be no_change/in_stock/out_of_stock')
+              if featured not in {'no_change','featured','normal'}:
+                  raise SystemExit(f'Line {line_no}: featured must be no_change/featured/normal')
+
+              item=dict(by_id.get(pid,{'id':pid}))
+              touched=False
+              if price:
+                  p=price.replace(',','')
+                  if not p.isdigit():
+                      raise SystemExit(f'Line {line_no}: price must be numbers only')
+                  value=int(p)
+                  if value<=0 or value>100_000_000:
+                      raise SystemExit(f'Line {line_no}: price out of range')
+                  item['price']=value
+                  item['priceText']=f'{value:,} ကျပ်'
+                  touched=True
+              if stock=='in_stock': item['available']=True; touched=True
+              elif stock=='out_of_stock': item['available']=False; touched=True
+              if featured=='featured': item['featured']=True; touched=True
+              elif featured=='normal': item['featured']=False; touched=True
+              if not touched:
+                  raise SystemExit(f'Line {line_no}: no change specified for {pid}')
+              item['updatedAt']=today
+              by_id[pid]=item
+              changed.append(pid)
+
+          out=sorted(by_id.values(),key=lambda x:x.get('id',''))
+          path.write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
+          mp=Path('manifest.json')
+          manifest=json.loads(mp.read_text(encoding='utf-8'))
+          now=datetime.now(timezone.utc)
+          manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
+          manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
+          mp.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('Updated:', ', '.join(changed))
+          PY
+
+      - name: Commit batch catalogue update
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add overrides.json manifest.json
+          if git diff --cached --quiet; then
+            echo 'No data change.'
+          else
+            git commit -m 'Batch update catalogue data'
+            git push
+          fi
