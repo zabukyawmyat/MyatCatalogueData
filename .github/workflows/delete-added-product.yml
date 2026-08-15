@@ -1,0 +1,66 @@
+name: Delete Added Catalogue Product
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: 'Product Code to delete (MYAT-103+)'
+        required: true
+        type: string
+      confirm:
+        description: 'DELETE လို့ အတိအကျရိုက်ပါ'
+        required: true
+        type: string
+      delete_image:
+        description: 'Repo product image ကိုပါဖျက်မလား'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete online-added product
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          CONFIRM: ${{ inputs.confirm }}
+          DELETE_IMAGE: ${{ inputs.delete_image }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime, timezone
+          from pathlib import Path
+          pid=os.environ['PRODUCT_ID'].strip().upper()
+          if os.environ.get('CONFIRM','').strip()!='DELETE': raise SystemExit('Confirmation must be DELETE')
+          if not re.fullmatch(r'MYAT-\d{3,4}',pid) or int(pid.split('-')[1])<=102: raise SystemExit('Only MYAT-103+ products can be deleted here')
+          p=Path('additions.json'); data=json.loads(p.read_text(encoding='utf-8'))
+          item=next((x for x in data if x.get('id')==pid),None)
+          if not item: raise SystemExit(f'{pid} not found')
+          data=[x for x in data if x.get('id')!=pid]
+          p.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          op=Path('overrides.json'); overrides=json.loads(op.read_text(encoding='utf-8')); overrides=[x for x in overrides if x.get('id')!=pid]
+          op.write_text(json.dumps(overrides,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          if os.environ.get('DELETE_IMAGE','false').lower()=='true':
+              prefix=f"https://raw.githubusercontent.com/{os.environ['REPOSITORY']}/main/product-images/"
+              image=item.get('image','')
+              if image.startswith(prefix):
+                  fn=image[len(prefix):]
+                  path=Path('product-images')/fn
+                  if path.is_file(): path.unlink()
+          mp=Path('manifest.json'); m=json.loads(mp.read_text(encoding='utf-8')); now=datetime.now(timezone.utc)
+          m['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S'); m['updatedAt']=now.isoformat().replace('+00:00','Z'); m['onlineAdditionCount']=len(data)
+          mp.write_text(json.dumps(m,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+      - name: Commit deletion
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A additions.json overrides.json manifest.json product-images
+          git commit -m "Delete ${{ inputs.product_id }} from catalogue"
+          git push
