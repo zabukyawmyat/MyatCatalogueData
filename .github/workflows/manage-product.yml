@@ -1,0 +1,237 @@
+name: Catalogue Product Manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: 'Code: M-001 / MYAT-001 / 001. Product အသစ်ဆို blank ထားလို့ရပါတယ်'
+        required: false
+        type: string
+      name:
+        description: 'Product Name (blank = no change for existing product)'
+        required: false
+        type: string
+      price:
+        description: 'Price MMK (blank = no change)'
+        required: false
+        type: string
+      category:
+        description: 'Category (blank = no change)'
+        required: false
+        type: string
+      sub:
+        description: 'Sub-category (blank = no change, __CLEAR__ = remove)'
+        required: false
+        type: string
+      detail:
+        description: 'Description (blank = no change, __CLEAR__ = remove)'
+        required: false
+        type: string
+      image_file:
+        description: 'product-images filename. Extension မရေးလည်းရ (ဥပမာ M-103 or M-103.jpg)'
+        required: false
+        type: string
+      image_url:
+        description: 'Public HTTPS image URL (optional)'
+        required: false
+        type: string
+      stock:
+        description: 'Stock status'
+        required: true
+        default: 'no_change'
+        type: choice
+        options:
+          - no_change
+          - in_stock
+          - out_of_stock
+      featured:
+        description: 'Featured status'
+        required: true
+        default: 'no_change'
+        type: choice
+        options:
+          - no_change
+          - featured
+          - normal
+
+permissions:
+  contents: write
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add or edit catalogue product
+        env:
+          RAW_ID: ${{ inputs.product_id }}
+          PRODUCT_NAME: ${{ inputs.name }}
+          PRICE: ${{ inputs.price }}
+          CATEGORY: ${{ inputs.category }}
+          SUB: ${{ inputs.sub }}
+          DETAIL: ${{ inputs.detail }}
+          IMAGE_FILE: ${{ inputs.image_file }}
+          IMAGE_URL: ${{ inputs.image_url }}
+          STOCK: ${{ inputs.stock }}
+          FEATURED: ${{ inputs.featured }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          additions_path=Path('additions.json')
+          overrides_path=Path('overrides.json')
+          manifest_path=Path('manifest.json')
+          additions=json.loads(additions_path.read_text(encoding='utf-8'))
+          overrides=json.loads(overrides_path.read_text(encoding='utf-8'))
+          manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
+          if not isinstance(additions,list) or not isinstance(overrides,list):
+              raise SystemExit('Catalogue JSON structure is invalid')
+
+          def normalize_id(raw):
+              raw=(raw or '').strip().upper()
+              if not raw:
+                  used=[102]
+                  for x in additions:
+                      m=re.fullmatch(r'MYAT-(\d{3,4})',str(x.get('id','')).upper())
+                      if m: used.append(int(m.group(1)))
+                  return f'MYAT-{max(used)+1:03d}'
+              raw=raw.replace(' ','')
+              m=re.fullmatch(r'(?:MYAT-|M-)?(\d{1,4})',raw)
+              if not m:
+                  raise SystemExit('Product Code ကို M-001 / MYAT-001 / 001 ပုံစံနဲ့ထည့်ပါ')
+              n=int(m.group(1))
+              if n < 1:
+                  raise SystemExit('Product number must be 1 or greater')
+              return f'MYAT-{n:03d}'
+
+          pid=normalize_id(os.environ.get('RAW_ID',''))
+          number=int(pid.split('-')[1])
+          add_idx=next((i for i,x in enumerate(additions) if x.get('id')==pid),None)
+          is_bundled=1 <= number <= 102
+          is_existing_added=add_idx is not None
+          is_new=not is_bundled and not is_existing_added
+
+          name=os.environ.get('PRODUCT_NAME','').strip()
+          price_raw=os.environ.get('PRICE','').strip().replace(',','')
+          category=os.environ.get('CATEGORY','').strip()
+          sub=os.environ.get('SUB','').strip()
+          detail=os.environ.get('DETAIL','').strip()
+          stock=os.environ.get('STOCK','no_change')
+          featured=os.environ.get('FEATURED','no_change')
+
+          def resolve_image(required=False):
+              raw=os.environ.get('IMAGE_FILE','').strip()
+              url=os.environ.get('IMAGE_URL','').strip()
+              if raw:
+                  if '/' in raw or '\\' in raw:
+                      raise SystemExit('Image filename ထဲ folder path မထည့်ပါနဲ့')
+                  candidates=[]
+                  if re.search(r'\.(jpg|jpeg|png|webp)$',raw,re.I):
+                      candidates.append(raw)
+                  else:
+                      bases=[raw,pid,pid.replace('MYAT-','M-')]
+                      for b in dict.fromkeys(bases):
+                          candidates += [b+ext for ext in ('.jpg','.jpeg','.png','.webp')]
+                  found=next((c for c in candidates if (Path('product-images')/c).is_file()),None)
+                  if not found:
+                      raise SystemExit('Product image မတွေ့ပါ။ product-images folder ထဲပုံ Upload တင်ပြီး filename ကိုပြန်စစ်ပါ')
+                  return f"https://raw.githubusercontent.com/{os.environ['REPOSITORY']}/main/product-images/{found}"
+              if url:
+                  if not url.lower().startswith('https://'):
+                      raise SystemExit('Image URL must start with https://')
+                  return url
+              if required:
+                  auto=[]
+                  for base in (pid,pid.replace('MYAT-','M-')):
+                      auto += [base+ext for ext in ('.jpg','.jpeg','.png','.webp')]
+                  found=next((c for c in auto if (Path('product-images')/c).is_file()),None)
+                  if found:
+                      return f"https://raw.githubusercontent.com/{os.environ['REPOSITORY']}/main/product-images/{found}"
+                  raise SystemExit(f'{pid} Product အသစ်အတွက် ပုံလိုပါတယ်။ product-images ထဲ {pid}.jpg (သို့) M-{number:03d}.jpg Upload တင်ပါ')
+              return None
+
+          now=datetime.now(timezone.utc)
+          today=now.date().isoformat()
+
+          if is_new:
+              if number <= 102:
+                  raise SystemExit('Bundled product detection error')
+              if not name or not category or not price_raw:
+                  raise SystemExit(f'{pid} က Product အသစ်ပါ။ Name, Price, Category သုံးခုလုံးဖြည့်ပါ')
+              if not price_raw.isdigit():
+                  raise SystemExit('Price must contain numbers only')
+              price=int(price_raw)
+              image=resolve_image(required=True)
+              item={
+                  'id':pid,'name':name,'price':price,'priceText':f'{price:,} ကျပ်',
+                  'category':category,'sub':'' if sub=='__CLEAR__' else sub,
+                  'detail':'' if detail=='__CLEAR__' else detail,'image':image,
+                  'available':stock!='out_of_stock','featured':featured=='featured',
+                  'updatedAt':today
+              }
+              additions.append(item)
+              additions.sort(key=lambda x:int(str(x.get('id','MYAT-9999')).split('-')[-1]))
+              print(f'ADDED {pid}')
+
+          elif is_existing_added:
+              item=dict(additions[add_idx]); changed=False
+              if name: item['name']=name; changed=True
+              if price_raw:
+                  if not price_raw.isdigit(): raise SystemExit('Price must contain numbers only')
+                  price=int(price_raw); item['price']=price; item['priceText']=f'{price:,} ကျပ်'; changed=True
+              if category: item['category']=category; changed=True
+              if sub: item['sub']='' if sub=='__CLEAR__' else sub; changed=True
+              if detail: item['detail']='' if detail=='__CLEAR__' else detail; changed=True
+              image=resolve_image(required=False)
+              if image: item['image']=image; changed=True
+              if stock=='in_stock': item['available']=True; changed=True
+              elif stock=='out_of_stock': item['available']=False; changed=True
+              if featured=='featured': item['featured']=True; changed=True
+              elif featured=='normal': item['featured']=False; changed=True
+              if not changed: raise SystemExit('ပြောင်းလဲမယ့်အချက် တစ်ခုခုဖြည့်ပါ')
+              item['updatedAt']=today; additions[add_idx]=item
+              print(f'EDITED ONLINE PRODUCT {pid}')
+
+          else:
+              existing=next((x for x in overrides if x.get('id')==pid),None)
+              item=dict(existing or {'id':pid}); changed=False
+              if name: item['name']=name; changed=True
+              if price_raw:
+                  if not price_raw.isdigit(): raise SystemExit('Price must contain numbers only')
+                  price=int(price_raw); item['price']=price; item['priceText']=f'{price:,} ကျပ်'; changed=True
+              if category: item['category']=category; changed=True
+              if sub: item['sub']='' if sub=='__CLEAR__' else sub; changed=True
+              if detail: item['detail']='' if detail=='__CLEAR__' else detail; changed=True
+              image=resolve_image(required=False)
+              if image: item['image']=image; item.pop('sprite',None); changed=True
+              if stock=='in_stock': item['available']=True; changed=True
+              elif stock=='out_of_stock': item['available']=False; changed=True
+              if featured=='featured': item['featured']=True; changed=True
+              elif featured=='normal': item['featured']=False; changed=True
+              if not changed: raise SystemExit('ပြောင်းလဲမယ့်အချက် တစ်ခုခုဖြည့်ပါ')
+              item['updatedAt']=today
+              overrides=[x for x in overrides if x.get('id')!=pid]
+              overrides.append(item)
+              overrides.sort(key=lambda x:int(str(x.get('id','MYAT-9999')).split('-')[-1]))
+              print(f'EDITED BUNDLED PRODUCT {pid}')
+
+          additions_path.write_text(json.dumps(additions,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          overrides_path.write_text(json.dumps(overrides,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
+          manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
+          manifest['onlineAdditionCount']=len(additions)
+          manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('READY',pid)
+          PY
+
+      - name: Commit catalogue changes
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add additions.json overrides.json manifest.json
+          git commit -m "Manage catalogue product ${{ inputs.product_id || 'NEW' }}"
+          git push
