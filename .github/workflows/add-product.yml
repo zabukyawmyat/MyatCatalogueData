@@ -1,0 +1,139 @@
+name: Add New Catalogue Product
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: 'Product Code (ဥပမာ MYAT-103)'
+        required: true
+        type: string
+      name:
+        description: 'Product Name'
+        required: true
+        type: string
+      price:
+        description: 'ဈေးနှုန်း (ကျပ်)'
+        required: true
+        type: string
+      category:
+        description: 'Category'
+        required: true
+        type: string
+      sub:
+        description: 'Sub-category (optional)'
+        required: false
+        type: string
+      detail:
+        description: 'Description (optional)'
+        required: false
+        type: string
+      image_url:
+        description: 'Public HTTPS image URL'
+        required: true
+        type: string
+      stock:
+        description: 'Stock status'
+        required: true
+        default: 'in_stock'
+        type: choice
+        options:
+          - in_stock
+          - out_of_stock
+      featured:
+        description: 'Featured?'
+        required: true
+        default: 'normal'
+        type: choice
+        options:
+          - normal
+          - featured
+
+permissions:
+  contents: write
+
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate and add product
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          PRODUCT_NAME: ${{ inputs.name }}
+          PRICE: ${{ inputs.price }}
+          CATEGORY: ${{ inputs.category }}
+          SUB: ${{ inputs.sub }}
+          DETAIL: ${{ inputs.detail }}
+          IMAGE_URL: ${{ inputs.image_url }}
+          STOCK: ${{ inputs.stock }}
+          FEATURED: ${{ inputs.featured }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          pid=os.environ['PRODUCT_ID'].strip().upper()
+          m=re.fullmatch(r'MYAT-(\d{3,4})', pid)
+          if not m:
+              raise SystemExit('Product Code must look like MYAT-103')
+          n=int(m.group(1))
+          if n <= 102:
+              raise SystemExit('MYAT-001 to MYAT-102 are bundled products. New products must start at MYAT-103.')
+
+          name=os.environ['PRODUCT_NAME'].strip()
+          category=os.environ['CATEGORY'].strip()
+          if not name or not category:
+              raise SystemExit('Product name and category are required')
+
+          price_text=os.environ['PRICE'].strip().replace(',','')
+          if not price_text.isdigit() or int(price_text) < 0:
+              raise SystemExit('Price must be numbers only')
+          price=int(price_text)
+
+          image=os.environ['IMAGE_URL'].strip()
+          if not re.match(r'^https://', image, re.I):
+              raise SystemExit('Image URL must start with https://')
+
+          path=Path('additions.json')
+          data=json.loads(path.read_text(encoding='utf-8'))
+          if not isinstance(data,list):
+              raise SystemExit('additions.json must be a list')
+          if any(x.get('id')==pid for x in data):
+              raise SystemExit(f'{pid} already exists in additions.json')
+
+          item={
+              'id':pid,
+              'name':name,
+              'price':price,
+              'priceText':f'{price:,} ကျပ်',
+              'category':category,
+              'sub':os.environ.get('SUB','').strip(),
+              'detail':os.environ.get('DETAIL','').strip(),
+              'image':image,
+              'available':os.environ.get('STOCK')!='out_of_stock',
+              'featured':os.environ.get('FEATURED')=='featured',
+              'updatedAt':datetime.now(timezone.utc).date().isoformat()
+          }
+          data.append(item)
+          data.sort(key=lambda x:int(x.get('id','MYAT-9999').split('-')[-1]))
+          path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
+          mp=Path('manifest.json')
+          manifest=json.loads(mp.read_text(encoding='utf-8'))
+          now=datetime.now(timezone.utc)
+          manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
+          manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
+          manifest['onlineAdditionCount']=len(data)
+          mp.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('Added',pid)
+          PY
+
+      - name: Commit new product
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add additions.json manifest.json
+          git commit -m "Add ${{ inputs.product_id }} to catalogue"
+          git push
