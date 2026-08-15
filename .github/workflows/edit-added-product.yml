@@ -1,0 +1,123 @@
+name: Edit Added Catalogue Product
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: 'Product Code (MYAT-103+)'
+        required: true
+        type: string
+      name:
+        description: 'New Product Name (blank = no change)'
+        required: false
+        type: string
+      price:
+        description: 'New price (blank = no change)'
+        required: false
+        type: string
+      category:
+        description: 'New Category (blank = no change)'
+        required: false
+        type: string
+      sub:
+        description: 'New Sub-category (use __CLEAR__ to remove)'
+        required: false
+        type: string
+      detail:
+        description: 'New Description (use __CLEAR__ to remove)'
+        required: false
+        type: string
+      image_file:
+        description: 'New product-images filename (blank = no change)'
+        required: false
+        type: string
+      image_url:
+        description: 'New public HTTPS image URL (blank = no change)'
+        required: false
+        type: string
+      stock:
+        description: 'Stock status'
+        required: true
+        default: 'no_change'
+        type: choice
+        options: [no_change, in_stock, out_of_stock]
+      featured:
+        description: 'Featured status'
+        required: true
+        default: 'no_change'
+        type: choice
+        options: [no_change, featured, normal]
+
+permissions:
+  contents: write
+
+jobs:
+  edit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Edit online-added product
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          PRODUCT_NAME: ${{ inputs.name }}
+          PRICE: ${{ inputs.price }}
+          CATEGORY: ${{ inputs.category }}
+          SUB: ${{ inputs.sub }}
+          DETAIL: ${{ inputs.detail }}
+          IMAGE_FILE: ${{ inputs.image_file }}
+          IMAGE_URL: ${{ inputs.image_url }}
+          STOCK: ${{ inputs.stock }}
+          FEATURED: ${{ inputs.featured }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime, timezone
+          from pathlib import Path
+          pid=os.environ['PRODUCT_ID'].strip().upper()
+          if not re.fullmatch(r'MYAT-\d{3,4}',pid) or int(pid.split('-')[1])<=102:
+              raise SystemExit('Only online-added MYAT-103+ products can be edited here')
+          p=Path('additions.json'); data=json.loads(p.read_text(encoding='utf-8'))
+          idx=next((i for i,x in enumerate(data) if x.get('id')==pid),None)
+          if idx is None: raise SystemExit(f'{pid} not found in additions.json')
+          item=dict(data[idx]); changed=False
+          name=os.environ.get('PRODUCT_NAME','').strip()
+          if name: item['name']=name; changed=True
+          price=os.environ.get('PRICE','').strip().replace(',','')
+          if price:
+              if not price.isdigit(): raise SystemExit('Price must be numbers only')
+              v=int(price); item['price']=v; item['priceText']=f'{v:,} ကျပ်'; changed=True
+          cat=os.environ.get('CATEGORY','').strip()
+          if cat: item['category']=cat; changed=True
+          for key,envname in [('sub','SUB'),('detail','DETAIL')]:
+              v=os.environ.get(envname,'').strip()
+              if v:
+                  item[key]='' if v=='__CLEAR__' else v; changed=True
+          image_file=os.environ.get('IMAGE_FILE','').strip(); image_url=os.environ.get('IMAGE_URL','').strip()
+          if image_file:
+              if '/' in image_file or '\\' in image_file or not re.fullmatch(r'[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)',image_file,re.I): raise SystemExit('Invalid image filename')
+              if not (Path('product-images')/image_file).is_file(): raise SystemExit('Image file not found in product-images')
+              item['image']=f"https://raw.githubusercontent.com/{os.environ['REPOSITORY']}/main/product-images/{image_file}"; changed=True
+          elif image_url:
+              if not image_url.lower().startswith('https://'): raise SystemExit('Image URL must start with https://')
+              item['image']=image_url; changed=True
+          stock=os.environ.get('STOCK','no_change')
+          if stock=='in_stock': item['available']=True; changed=True
+          elif stock=='out_of_stock': item['available']=False; changed=True
+          feat=os.environ.get('FEATURED','no_change')
+          if feat=='featured': item['featured']=True; changed=True
+          elif feat=='normal': item['featured']=False; changed=True
+          if not changed: raise SystemExit('No changes requested')
+          item['updatedAt']=datetime.now(timezone.utc).date().isoformat(); data[idx]=item
+          p.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          mp=Path('manifest.json'); m=json.loads(mp.read_text(encoding='utf-8')); now=datetime.now(timezone.utc)
+          m['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S'); m['updatedAt']=now.isoformat().replace('+00:00','Z')
+          mp.write_text(json.dumps(m,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add additions.json manifest.json
+          git commit -m "Edit ${{ inputs.product_id }} catalogue product"
+          git push
