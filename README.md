@@ -1,31 +1,45 @@
 # မြတ် Catalogue Data
 
-ဒီ Public repository က **Customer App ရဲ့ Online ဈေးနှုန်း / Stock update data** အတွက်ပဲ အသုံးပြုပါသည်။ App source code၊ signing key၊ password မထားပါနှင့်။
+ဒီ Public repository က **Customer App ရဲ့ Online ဈေးနှုန်း / Stock / App update data** အတွက်ပဲ အသုံးပြုပါသည်။ App source code၊ signing key၊ password မထားပါနှင့်။
 
-## Product တစ်ခု ဈေး/Stock ပြောင်းရန် အလွယ်ဆုံးနည်း
+## 1. Product တစ်ခု ဈေး/Stock ပြောင်းရန်
 
 1. GitHub repo ထဲက **Actions** ကိုဝင်ပါ။
 2. **Update Catalogue Product** ကိုရွေးပါ။
 3. **Run workflow** နှိပ်ပါ။
-4. Product Code ထည့်ပါ — ဥပမာ `MYAT-001`။
+4. Product Code ထည့်ပါ — `MYAT-001` မှ `MYAT-102` အထိ။
 5. ဈေးပြောင်းမယ်ဆို `price` ထည့်ပါ။ မပြောင်းရင် blank ထားပါ။
 6. Stock ကို `in_stock` / `out_of_stock` / `no_change` ရွေးပါ။
-7. Run workflow လုပ်ပါ။
-8. Customer App မှာ **Refresh** နှိပ်ရင် update ဝင်ပါမယ်။
+7. Featured ပြောင်းလိုလျှင် `featured` / `normal` ရွေးနိုင်ပါသည်။
+8. Run workflow လုပ်ပါ။ Customer App မှာ **Refresh** နှိပ်ရင် update ဝင်ပါမယ်။
 
-`overrides.json` က ပြောင်းထားတဲ့ Product တွေကိုပဲ သိမ်းထားပါတယ်။ Product ပုံနဲ့ အမည်အစုံက APK ထဲမှာရှိပြီးသားဖြစ်လို့ ဒီ repo ကို ပေါ့ပါးအောင်ထားနိုင်ပါတယ်။
+Override တစ်ခုကိုဖျက်ပြီး APK ထဲက မူရင်းဈေး/Stock ပြန်သုံးချင်ရင် `remove_override` ကိုဖွင့်ပြီး Run လုပ်ပါ။
 
-## App version အသစ် MediaFire မှာတင်တဲ့အခါ
+## 2. Online ပြောင်းထားသမျှ အားလုံး Reset လုပ်ရန်
 
-`app-release.json` ထဲမှာ:
-- `latestVersionCode`
-- `latestVersionName`
-- `apkUrl`
-- `message`
+**Actions > Reset Online Catalogue Changes** ကိုရွေးပါ။ `confirm` မှာ `RESET` လို့ အတိအကျရိုက်ပြီး Run လုပ်ပါ။ `overrides.json` ကိုရှင်းပြီး Customer App က APK ထဲက မူရင်း catalogue ကိုပြန်သုံးပါမယ်။
 
-တို့ကိုပြင်ပါ။ `apkUrl` ကို MediaFire download page/link ထည့်ပြီး versionCode က အသုံးပြုသူ App ထက်မြင့်သွားရင် App ထဲမှာ **Version အသစ်ရရှိပြီ** ဆိုတဲ့ Download banner ပေါ်လာပါမယ်။
+## 3. MediaFire APK အသစ်တင်ပြီး Update အသိပေးရန်
+
+1. APK အသစ်ကို MediaFire မှာအရင်တင်ပါ။
+2. **Actions > Update App Download Link** ကိုဝင်ပါ။
+3. Version Code / Version Name / MediaFire URL ထည့်ပါ။
+4. Update message ထည့်နိုင်ပါသည်။
+5. `required_update` ကို ပုံမှန်အားဖြင့် **false** ထားပါ။
+6. Run workflow လုပ်ပါ။
+
+Version Code က အသုံးပြုသူဖုန်းထဲက App ထက်မြင့်နေပြီး MediaFire URL ရှိရင် App မှာ **Version အသစ်ရရှိပြီ** Download banner ပေါ်ပါမယ်။
+
+## Data files
+
+- `manifest.json` — Online catalogue version/status
+- `overrides.json` — ပြောင်းထားတဲ့ Product တွေရဲ့ ဈေး/Stock/Featured data ပဲ သိမ်းသည်
+- `app-release.json` — MediaFire App update metadata
+
+Product ပုံ၊ အမည်၊ အသေးစိတ် စတဲ့ base catalogue data က APK ထဲမှာရှိပြီးသားဖြစ်လို့ Public repo ကို ပေါ့ပါးစွာထားနိုင်ပါတယ်။
 
 ## အရေးကြီး
 
-- `MyatCatalogue` source repo ကို Private အတိုင်းထားပါ။
-- ဒီ repo ထဲ Signing Key / JKS / Password / Secret Token မတင်ပါနှင့်။
+- `MyatCatalogue` source repo ကို **Private** အတိုင်းထားပါ။
+- ဒီ Public repo ထဲ Signing Key / `.jks` / Password / Secret Token မတင်ပါနှင့်။
+- Product Code ကို `MYAT-001` မှ `MYAT-102` အတွင်းပဲ အသုံးပြုပါ။
