@@ -34,36 +34,17 @@ on:
         required: true
         default: false
         type: boolean
-  push:
-    paths:
-      - '.github/workflows/update-product.yml'
 
 permissions:
   contents: write
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate catalogue JSON
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          for f in ['manifest.json','overrides.json']:
-              json.loads(Path(f).read_text(encoding='utf-8'))
-              print('OK', f)
-          PY
-
   update:
-    if: github.event_name == 'workflow_dispatch'
-    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update product override
+      - name: Validate and update product override
         env:
           PRODUCT_ID: ${{ inputs.product_id }}
           PRICE: ${{ inputs.price }}
@@ -76,14 +57,21 @@ jobs:
           from datetime import datetime, timezone
           from pathlib import Path
 
-          pid=os.environ['PRODUCT_ID'].strip().upper()
-          if not re.fullmatch(r'MYAT-\d{3}', pid):
-              raise SystemExit('Product Code must look like MYAT-001')
-
-          op=Path('overrides.json')
-          data=json.loads(op.read_text(encoding='utf-8'))
+          # Basic file validation first.
+          manifest_path=Path('manifest.json')
+          overrides_path=Path('overrides.json')
+          manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
+          data=json.loads(overrides_path.read_text(encoding='utf-8'))
           if not isinstance(data,list):
-              raise SystemExit('overrides.json must be a list')
+              raise SystemExit('overrides.json must be a JSON list')
+
+          pid=os.environ['PRODUCT_ID'].strip().upper()
+          m=re.fullmatch(r'MYAT-(\d{3})', pid)
+          if not m:
+              raise SystemExit('Product Code must look like MYAT-001')
+          number=int(m.group(1))
+          if number < 1 or number > 102:
+              raise SystemExit('Product Code must be between MYAT-001 and MYAT-102')
 
           remove=os.environ.get('REMOVE_OVERRIDE','false').lower()=='true'
           existing=next((x for x in data if x.get('id')==pid),None)
@@ -95,8 +83,10 @@ jobs:
               price=os.environ.get('PRICE','').strip().replace(',','')
               if price:
                   if not price.isdigit():
-                      raise SystemExit('Price must be numbers only')
+                      raise SystemExit('Price must contain numbers only')
                   value=int(price)
+                  if value < 0 or value > 100000000:
+                      raise SystemExit('Price value is outside the allowed range')
                   item['price']=value
                   item['priceText']=f'{value:,} ကျပ်'
 
@@ -108,19 +98,36 @@ jobs:
               if featured=='featured': item['featured']=True
               elif featured=='normal': item['featured']=False
 
+              # Avoid creating an empty/no-op override.
+              if not existing and not price and stock=='no_change' and featured=='no_change':
+                  raise SystemExit('No change was requested for this product')
+
               item['updatedAt']=datetime.now(timezone.utc).date().isoformat()
               data=[x for x in data if x.get('id')!=pid]
               data.append(item)
               data.sort(key=lambda x:x.get('id',''))
 
-          op.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          # Validate every override ID before writing.
+          seen=set()
+          for item in data:
+              iid=item.get('id','')
+              mm=re.fullmatch(r'MYAT-(\d{3})', iid)
+              if not mm or not (1 <= int(mm.group(1)) <= 102):
+                  raise SystemExit(f'Invalid override Product Code: {iid}')
+              if iid in seen:
+                  raise SystemExit(f'Duplicate override Product Code: {iid}')
+              seen.add(iid)
 
-          mp=Path('manifest.json')
-          manifest=json.loads(mp.read_text(encoding='utf-8'))
+          overrides_path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
           now=datetime.now(timezone.utc)
+          manifest['schemaVersion']=2
+          manifest['mode']='overrides'
+          manifest['productFiles']=['overrides.json']
+          manifest['expectedBaseProductCount']=102
           manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
           manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
-          mp.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
           print('Updated',pid,'remove=' + str(remove))
           PY
 
