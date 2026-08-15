@@ -1,0 +1,137 @@
+name: Update Catalogue Product
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: 'Product Code (ဥပမာ MYAT-001)'
+        required: true
+        type: string
+      price:
+        description: 'ဈေးနှုန်း (ကျပ်) — မပြောင်းလိုလျှင် blank ထားပါ'
+        required: false
+        type: string
+      stock:
+        description: 'Stock status'
+        required: true
+        default: 'no_change'
+        type: choice
+        options:
+          - no_change
+          - in_stock
+          - out_of_stock
+      featured:
+        description: 'Featured status'
+        required: true
+        default: 'no_change'
+        type: choice
+        options:
+          - no_change
+          - featured
+          - normal
+      remove_override:
+        description: 'ဒီ Product ရဲ့ online override ကိုဖျက်မလား'
+        required: true
+        default: false
+        type: boolean
+  push:
+    paths:
+      - '.github/workflows/update-product.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate catalogue JSON
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for f in ['manifest.json','overrides.json']:
+              json.loads(Path(f).read_text(encoding='utf-8'))
+              print('OK', f)
+          PY
+
+  update:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update product override
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          PRICE: ${{ inputs.price }}
+          STOCK: ${{ inputs.stock }}
+          FEATURED: ${{ inputs.featured }}
+          REMOVE_OVERRIDE: ${{ inputs.remove_override }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          pid=os.environ['PRODUCT_ID'].strip().upper()
+          if not re.fullmatch(r'MYAT-\d{3}', pid):
+              raise SystemExit('Product Code must look like MYAT-001')
+
+          op=Path('overrides.json')
+          data=json.loads(op.read_text(encoding='utf-8'))
+          if not isinstance(data,list):
+              raise SystemExit('overrides.json must be a list')
+
+          remove=os.environ.get('REMOVE_OVERRIDE','false').lower()=='true'
+          existing=next((x for x in data if x.get('id')==pid),None)
+
+          if remove:
+              data=[x for x in data if x.get('id')!=pid]
+          else:
+              item=dict(existing or {'id':pid})
+              price=os.environ.get('PRICE','').strip().replace(',','')
+              if price:
+                  if not price.isdigit():
+                      raise SystemExit('Price must be numbers only')
+                  value=int(price)
+                  item['price']=value
+                  item['priceText']=f'{value:,} ကျပ်'
+
+              stock=os.environ.get('STOCK','no_change')
+              if stock=='in_stock': item['available']=True
+              elif stock=='out_of_stock': item['available']=False
+
+              featured=os.environ.get('FEATURED','no_change')
+              if featured=='featured': item['featured']=True
+              elif featured=='normal': item['featured']=False
+
+              item['updatedAt']=datetime.now(timezone.utc).date().isoformat()
+              data=[x for x in data if x.get('id')!=pid]
+              data.append(item)
+              data.sort(key=lambda x:x.get('id',''))
+
+          op.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
+          mp=Path('manifest.json')
+          manifest=json.loads(mp.read_text(encoding='utf-8'))
+          now=datetime.now(timezone.utc)
+          manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
+          manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
+          mp.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('Updated',pid,'remove=' + str(remove))
+          PY
+
+      - name: Commit online catalogue update
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add overrides.json manifest.json
+          if git diff --cached --quiet; then
+            echo 'No data change.'
+          else
+            git commit -m "Update ${{ inputs.product_id }} catalogue data"
+            git push
+          fi
