@@ -1,0 +1,50 @@
+name: Reset Online Catalogue Changes
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'RESET လို့ ရိုက်ထည့်ပါ'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reset overrides to bundled catalogue defaults
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          if os.environ.get('CONFIRM','').strip().upper()!='RESET':
+              raise SystemExit('Confirmation failed. Type RESET exactly.')
+          Path('overrides.json').write_text('[]\n',encoding='utf-8')
+          manifest=json.loads(Path('manifest.json').read_text(encoding='utf-8'))
+          now=datetime.now(timezone.utc)
+          manifest.update({
+              'schemaVersion':2,
+              'catalogVersion':now.strftime('%Y.%m.%d.%H%M%S'),
+              'updatedAt':now.isoformat().replace('+00:00','Z'),
+              'mode':'overrides',
+              'productFiles':['overrides.json'],
+              'expectedBaseProductCount':102
+          })
+          Path('manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+
+      - name: Commit reset
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add overrides.json manifest.json
+          git commit -m 'Reset online catalogue changes' || echo 'Already reset.'
+          git push
