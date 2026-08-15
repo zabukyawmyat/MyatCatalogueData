@@ -1,0 +1,82 @@
+name: Update App Download Link
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'Version Code (ဥပမာ 25)'
+        required: true
+        type: string
+      version_name:
+        description: 'Version Name (ဥပမာ 2.5)'
+        required: true
+        type: string
+      mediafire_url:
+        description: 'MediaFire APK Link'
+        required: true
+        type: string
+      required_update:
+        description: 'မဖြစ်မနေ Update လုပ်စေမလား'
+        required: true
+        default: false
+        type: boolean
+      message:
+        description: 'Update message'
+        required: false
+        default: 'မြတ် Catalogue version အသစ်ရရှိနိုင်ပါသည်။'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate and update app-release.json
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          MEDIAFIRE_URL: ${{ inputs.mediafire_url }}
+          REQUIRED_UPDATE: ${{ inputs.required_update }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          vc=os.environ['VERSION_CODE'].strip()
+          vn=os.environ['VERSION_NAME'].strip()
+          url=os.environ['MEDIAFIRE_URL'].strip()
+          msg=os.environ.get('MESSAGE','').strip() or 'မြတ် Catalogue version အသစ်ရရှိနိုင်ပါသည်။'
+          if not vc.isdigit() or int(vc) < 1:
+              raise SystemExit('Version Code must be a positive integer')
+          if not re.fullmatch(r'\d+(?:\.\d+){1,2}',vn):
+              raise SystemExit('Version Name must look like 2.5 or 2.5.1')
+          if not url.startswith('https://'):
+              raise SystemExit('MediaFire URL must start with https://')
+          if 'mediafire.com' not in url.lower():
+              print('WARNING: URL is not a mediafire.com address, but it will still be accepted.')
+          data={
+              'latestVersionCode':int(vc),
+              'latestVersionName':vn,
+              'apkUrl':url,
+              'required':os.environ.get('REQUIRED_UPDATE','false').lower()=='true',
+              'message':msg
+          }
+          Path('app-release.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('Published app update metadata for',vn)
+          PY
+
+      - name: Commit app update metadata
+        run: |
+          git config user.name 'Myat Catalogue Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app-release.json
+          if git diff --cached --quiet; then
+            echo 'No metadata change.'
+          else
+            git commit -m "Publish app version ${{ inputs.version_name }}"
+            git push
+          fi
