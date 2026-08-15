@@ -15,11 +15,31 @@
 
 Override တစ်ခုကိုဖျက်ပြီး APK ထဲက မူရင်းဈေး/Stock ပြန်သုံးချင်ရင် `remove_override` ကိုဖွင့်ပြီး Run လုပ်ပါ။
 
-## 2. Online ပြောင်းထားသမျှ အားလုံး Reset လုပ်ရန်
+## 2. Product အများကြီးကို တစ်ခါတည်းပြောင်းရန်
+
+**Actions > Batch Update Catalogue Products** ကိုရွေးပြီး `updates` box ထဲမှာ Product တစ်ခုကို တစ်ကြောင်းစီ ရေးပါ။
+
+Format:
+`ProductCode,Price,Stock,Featured`
+
+ဥပမာ:
+```
+MYAT-001,22000,in_stock,no_change
+MYAT-002,6500,no_change,featured
+MYAT-003,,out_of_stock,no_change
+```
+
+- Price မပြောင်းရင် အလယ်နေရာကို blank ထားနိုင်ပါတယ်။
+- Stock = `in_stock` / `out_of_stock` / `no_change`
+- Featured = `featured` / `normal` / `no_change`
+- တစ်ကြိမ်မှာ Product 102 ခုအထိ update လုပ်နိုင်ပါတယ်။
+- Product Code မှားခြင်း၊ duplicate ဖြစ်ခြင်း၊ ဈေး format မှားခြင်းတွေကို workflow က စစ်ပြီးမှ commit လုပ်ပါတယ်။
+
+## 3. Online ပြောင်းထားသမျှ အားလုံး Reset လုပ်ရန်
 
 **Actions > Reset Online Catalogue Changes** ကိုရွေးပါ။ `confirm` မှာ `RESET` လို့ အတိအကျရိုက်ပြီး Run လုပ်ပါ။ `overrides.json` ကိုရှင်းပြီး Customer App က APK ထဲက မူရင်း catalogue ကိုပြန်သုံးပါမယ်။
 
-## 3. MediaFire APK အသစ်တင်ပြီး Update အသိပေးရန်
+## 4. MediaFire APK အသစ်တင်ပြီး Update အသိပေးရန်
 
 1. APK အသစ်ကို MediaFire မှာအရင်တင်ပါ။
 2. **Actions > Update App Download Link** ကိုဝင်ပါ။
