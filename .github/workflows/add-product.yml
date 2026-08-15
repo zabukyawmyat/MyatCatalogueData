@@ -27,9 +27,13 @@ on:
         description: 'Description (optional)'
         required: false
         type: string
+      image_file:
+        description: 'product-images ထဲ Upload တင်ထားသောပုံ filename (ဥပမာ MYAT-103.jpg)'
+        required: false
+        type: string
       image_url:
-        description: 'Public HTTPS image URL'
-        required: true
+        description: 'Public HTTPS image URL (image_file မသုံးလျှင်သာ)'
+        required: false
         type: string
       stock:
         description: 'Stock status'
@@ -65,9 +69,11 @@ jobs:
           CATEGORY: ${{ inputs.category }}
           SUB: ${{ inputs.sub }}
           DETAIL: ${{ inputs.detail }}
+          IMAGE_FILE: ${{ inputs.image_file }}
           IMAGE_URL: ${{ inputs.image_url }}
           STOCK: ${{ inputs.stock }}
           FEATURED: ${{ inputs.featured }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           python3 - <<'PY'
           import json, os, re
@@ -80,7 +86,7 @@ jobs:
               raise SystemExit('Product Code must look like MYAT-103')
           n=int(m.group(1))
           if n <= 102:
-              raise SystemExit('MYAT-001 to MYAT-102 are bundled products. New products must start at MYAT-103.')
+              raise SystemExit('New products must start at MYAT-103')
 
           name=os.environ['PRODUCT_NAME'].strip()
           category=os.environ['CATEGORY'].strip()
@@ -88,30 +94,33 @@ jobs:
               raise SystemExit('Product name and category are required')
 
           price_text=os.environ['PRICE'].strip().replace(',','')
-          if not price_text.isdigit() or int(price_text) < 0:
+          if not price_text.isdigit():
               raise SystemExit('Price must be numbers only')
           price=int(price_text)
 
-          image=os.environ['IMAGE_URL'].strip()
-          if not re.match(r'^https://', image, re.I):
-              raise SystemExit('Image URL must start with https://')
+          image_file=os.environ.get('IMAGE_FILE','').strip()
+          image_url=os.environ.get('IMAGE_URL','').strip()
+          if image_file:
+              if '/' in image_file or '\\' in image_file or not re.fullmatch(r'[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)', image_file, re.I):
+                  raise SystemExit('image_file must be a simple jpg/jpeg/png/webp filename')
+              image_path=Path('product-images')/image_file
+              if not image_path.is_file():
+                  raise SystemExit(f'product-images/{image_file} not found. Upload the image first.')
+              image=f"https://raw.githubusercontent.com/{os.environ['REPOSITORY']}/main/product-images/{image_file}"
+          else:
+              image=image_url
+              if not re.match(r'^https://', image, re.I):
+                  raise SystemExit('Upload an image to product-images and enter image_file, or provide an https:// image_url')
 
           path=Path('additions.json')
           data=json.loads(path.read_text(encoding='utf-8'))
-          if not isinstance(data,list):
-              raise SystemExit('additions.json must be a list')
-          if any(x.get('id')==pid for x in data):
-              raise SystemExit(f'{pid} already exists in additions.json')
+          if not isinstance(data,list): raise SystemExit('additions.json must be a list')
+          if any(x.get('id')==pid for x in data): raise SystemExit(f'{pid} already exists')
 
           item={
-              'id':pid,
-              'name':name,
-              'price':price,
-              'priceText':f'{price:,} ကျပ်',
-              'category':category,
-              'sub':os.environ.get('SUB','').strip(),
-              'detail':os.environ.get('DETAIL','').strip(),
-              'image':image,
+              'id':pid,'name':name,'price':price,'priceText':f'{price:,} ကျပ်',
+              'category':category,'sub':os.environ.get('SUB','').strip(),
+              'detail':os.environ.get('DETAIL','').strip(),'image':image,
               'available':os.environ.get('STOCK')!='out_of_stock',
               'featured':os.environ.get('FEATURED')=='featured',
               'updatedAt':datetime.now(timezone.utc).date().isoformat()
@@ -120,14 +129,13 @@ jobs:
           data.sort(key=lambda x:int(x.get('id','MYAT-9999').split('-')[-1]))
           path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
-          mp=Path('manifest.json')
-          manifest=json.loads(mp.read_text(encoding='utf-8'))
+          mp=Path('manifest.json'); manifest=json.loads(mp.read_text(encoding='utf-8'))
           now=datetime.now(timezone.utc)
           manifest['catalogVersion']=now.strftime('%Y.%m.%d.%H%M%S')
           manifest['updatedAt']=now.isoformat().replace('+00:00','Z')
           manifest['onlineAdditionCount']=len(data)
           mp.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-          print('Added',pid)
+          print('Added',pid,'image=',image)
           PY
 
       - name: Commit new product
